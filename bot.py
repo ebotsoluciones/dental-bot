@@ -1,14 +1,26 @@
 import requests
 import time
 import json
+import os
 from datetime import datetime, date
 
 # ===============================
 # CONFIGURACIÓN
 # ===============================
-TOKEN = "8572312796:AAH7Mjynp72pNfRg-T8ZJP3Sbg9I9rFP_Pw"  # JuanBot token
+
+TOKEN = os.environ.get("TOKEN")  # ahora viene desde Render
+if not TOKEN:
+    raise ValueError("No se encontró la variable de entorno TOKEN")
+
 URL = f"https://api.telegram.org/bot{TOKEN}"
 TURNOS_FILE = "turnos.json"
+
+# ===============================
+# ASEGURAR ARCHIVO JSON
+# ===============================
+if not os.path.exists(TURNOS_FILE):
+    with open(TURNOS_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f)
 
 # ===============================
 # ESTADOS
@@ -16,7 +28,6 @@ TURNOS_FILE = "turnos.json"
 INICIO = "INICIO"
 MENU = "MENU"
 FECHA_TURNO = "FECHA_TURNO"
-
 ADMIN_MENU = "ADMIN_MENU"
 ADMIN_FECHA = "ADMIN_FECHA"
 ADMIN_CANCELAR = "ADMIN_CANCELAR"
@@ -48,10 +59,7 @@ def cargar_turnos():
     try:
         with open(TURNOS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, list):
-                return data
-            else:
-                return []
+            return data if isinstance(data, list) else []
     except:
         return []
 
@@ -85,20 +93,7 @@ ADMIN_TXT = (
     "✍️ Elegí una opción:"
 )
 
-# ===============================
-# INICIO
-# ===============================
-print("🤖 Dental Assistant Demo iniciado...")
-print("⏳ Limpiando mensajes viejos...")
-
-try:
-    r = requests.get(f"{URL}/getUpdates", params={"timeout": 1}, timeout=5).json()
-    if "result" in r and r["result"]:
-        last_update_id = r["result"][-1]["update_id"]
-except:
-    last_update_id = 0
-
-print("✅ Listo. Offset:", last_update_id)
+print("🤖 Bot iniciado en Render...")
 
 # ===============================
 # LOOP PRINCIPAL
@@ -109,9 +104,9 @@ while True:
             f"{URL}/getUpdates",
             params={
                 "offset": last_update_id + 1,
-                "timeout": 5
+                "timeout": 10
             },
-            timeout=10
+            timeout=15
         )
 
         data = response.json()
@@ -129,19 +124,16 @@ while True:
 
             print(f"📩 {chat} | {txt} | Estado: {est}")
 
-            # START
             if txt.lower() == "/start":
                 estado[chat] = MENU
-                enviar(chat, "✅ Start recibido. Bienvenido al Dental Assistant Demo")
+                enviar(chat, "✅ Start recibido.")
                 enviar(chat, MENU_TXT)
                 continue
 
-            # BLOQUEO SIN START
             if est == INICIO:
                 enviar(chat, "⚠️ Enviá /start para comenzar.")
                 continue
 
-            # MENÚ PRINCIPAL
             if est == MENU:
 
                 if txt.lower() == "admin":
@@ -170,7 +162,7 @@ while True:
                     continue
 
                 if txt == "4":
-                    enviar(chat, "👋 Gracias por usar Dental Assistant Demo. ¡Hasta luego!")
+                    enviar(chat, "👋 Hasta luego.")
                     estado[chat] = INICIO
                     continue
 
@@ -178,117 +170,21 @@ while True:
                 enviar(chat, MENU_TXT)
                 continue
 
-            # TURNO USUARIO
             if est == FECHA_TURNO:
-
                 if fecha_valida(txt):
                     turnos = cargar_turnos()
                     turnos.append({"fecha": txt, "origen": "usuario"})
                     guardar_turnos(turnos)
 
-                    enviar(chat, f"✅ Turno solicitado para el {txt}")
+                    enviar(chat, f"✅ Turno solicitado para {txt}")
                     estado[chat] = MENU
                     enviar(chat, MENU_TXT)
                 else:
                     enviar(chat, "❌ Fecha inválida. Usá dd/mm/yyyy")
-
                 continue
 
-            # ADMIN MENU
-            if est == ADMIN_MENU:
-
-                turnos = cargar_turnos()
-
-                if txt == "1":
-                    hoy = date.today().strftime("%d/%m/%Y")
-                    lista = [t for t in turnos if t["fecha"] == hoy]
-
-                    if not lista:
-                        enviar(chat, "📭 No hay turnos hoy.")
-                    else:
-                        msg = "📋 Turnos del día:\n"
-                        for i, t in enumerate(lista, 1):
-                            msg += f"{i}. {t['fecha']} ({t['origen']})\n"
-                        enviar(chat, msg)
-
-                    enviar(chat, ADMIN_TXT)
-                    continue
-
-                if txt == "2":
-                    if not turnos:
-                        enviar(chat, "📭 No hay turnos cargados.")
-                    else:
-                        msg = "🗓️ Agenda:\n"
-                        for i, t in enumerate(turnos, 1):
-                            msg += f"{i}. {t['fecha']} ({t['origen']})\n"
-                        enviar(chat, msg)
-
-                    enviar(chat, ADMIN_TXT)
-                    continue
-
-                if txt == "3":
-                    estado[chat] = ADMIN_FECHA
-                    enviar(chat, "📆 Ingrese la fecha del nuevo turno (dd/mm/yyyy):")
-                    continue
-
-                if txt == "4":
-                    if not turnos:
-                        enviar(chat, "📭 No hay turnos para cancelar.")
-                        enviar(chat, ADMIN_TXT)
-                    else:
-                        msg = "❌ Turnos:\n"
-                        for i, t in enumerate(turnos, 1):
-                            msg += f"{i}. {t['fecha']} ({t['origen']})\n"
-                        msg += "\nIngrese el número a cancelar:"
-                        estado[chat] = ADMIN_CANCELAR
-                        enviar(chat, msg)
-                    continue
-
-                if txt == "5":
-                    enviar(chat, "👥 Pacientes en espera: (función futura)")
-                    enviar(chat, ADMIN_TXT)
-                    continue
-
-                if txt == "9":
-                    estado[chat] = MENU
-                    enviar(chat, "🔓 Sesión admin cerrada.")
-                    enviar(chat, MENU_TXT)
-                    continue
-
-                enviar(chat, "❌ Opción inválida.")
-                enviar(chat, ADMIN_TXT)
-                continue
-
-            # ADMIN FECHA
-            if est == ADMIN_FECHA:
-                if fecha_valida(txt):
-                    turnos = cargar_turnos()
-                    turnos.append({"fecha": txt, "origen": "admin"})
-                    guardar_turnos(turnos)
-
-                    enviar(chat, f"✅ Turno agregado para {txt}")
-                    estado[chat] = ADMIN_MENU
-                    enviar(chat, ADMIN_TXT)
-                else:
-                    enviar(chat, "❌ Fecha inválida. Usá dd/mm/yyyy")
-                continue
-
-            # ADMIN CANCELAR
-            if est == ADMIN_CANCELAR:
-                turnos = cargar_turnos()
-                if txt.isdigit() and 1 <= int(txt) <= len(turnos):
-                    eliminado = turnos.pop(int(txt) - 1)
-                    guardar_turnos(turnos)
-                    enviar(chat, f"🗑️ Turno {eliminado['fecha']} cancelado.")
-                else:
-                    enviar(chat, "❌ Número inválido.")
-
-                estado[chat] = ADMIN_MENU
-                enviar(chat, ADMIN_TXT)
-                continue
-
-        time.sleep(0.5)
+        time.sleep(1)
 
     except Exception as e:
         print("⚠️ Error general:", e)
-        time.sleep(3)
+        time.sleep(5)
