@@ -1,17 +1,34 @@
+"""
+BOT PARA TWILIO WHATSAPP SANDBOX
+--------------------------------
+Este bot utiliza la API de Twilio para WhatsApp.
+
+Flujo:
+1) Twilio recibe mensaje desde WhatsApp
+2) Twilio llama al webhook (/webhook)
+3) Flask procesa mensaje
+4) Responde con TwiML (MessagingResponse)
+5) Twilio envía respuesta al usuario
+
+No usa Meta Graph API ni tokens de WhatsApp Business.
+Es compatible con sandbox de Twilio.
+"""
+
 import json
 import os
-import requests
 from flask import Flask, request
 from datetime import datetime
+from twilio.twiml.messaging_response import MessagingResponse
+
+# --------------------------------------------------
+# APP FLASK
+# --------------------------------------------------
 
 app = Flask(__name__)
 
-# ============================
-# CONFIG
-# ============================
-
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
-PHONE_ID = os.environ.get("PHONE_ID")
+# --------------------------------------------------
+# ESTADO (memoria en runtime)
+# --------------------------------------------------
 
 estado = {}
 INICIO = "INICIO"
@@ -20,14 +37,16 @@ FECHA = "FECHA"
 HORA = "HORA"
 MENSAJE = "MENSAJE"
 
+# Archivos locales para turnos y mensajes
 TURNOS_FILE = "turnos.json"
 MENSAJES_FILE = "mensajes.json"
 
-# ============================
-# JSON HELPERS
-# ============================
+# --------------------------------------------------
+# HELPERS JSON
+# --------------------------------------------------
 
 def cargar_json(path):
+    """Carga JSON desde archivo. Si falla, retorna lista vacía."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -35,38 +54,13 @@ def cargar_json(path):
         return []
 
 def guardar_json(path, data):
+    """Guarda JSON en archivo con formato legible."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# ============================
-# WHATSAPP SEND
-# ============================
-
-def enviar_whatsapp(chat_id, texto):
-    if not WHATSAPP_TOKEN or not PHONE_ID:
-        print("Faltan variables WHATSAPP_TOKEN o PHONE_ID")
-        return
-
-    url = f"https://graph.facebook.com/v17.0/{PHONE_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": chat_id,
-        "type": "text",
-        "text": {"body": texto}
-    }
-
-    try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
-    except Exception as e:
-        print("Error enviando WhatsApp:", e)
-
-# ============================
-# MENU
-# ============================
+# --------------------------------------------------
+# MENÚ
+# --------------------------------------------------
 
 MENU_TXT = (
     "🤖 E-Bot Asistente\n\n"
@@ -77,88 +71,97 @@ MENU_TXT = (
     "✍️ Escriba el número:"
 )
 
-# ============================
-# WEBHOOK
-# ============================
+# --------------------------------------------------
+# WEBHOOK (TWILIO)
+# --------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
+    """
+    Endpoint que recibe mensajes desde Twilio.
+    Twilio envía datos en form-data:
+    From -> número del usuario
+    Body -> texto del mensaje
+    """
 
-    try:
-        mensaje = data["entry"][0]["changes"][0]["value"]["messages"][0]
-        chat_id = mensaje["from"]
-        texto = mensaje["text"]["body"].strip()
-    except:
-        return "ok"
+    from_number = request.values.get("From")
+    body = request.values.get("Body", "").strip()
 
-    est = estado.get(chat_id, INICIO)
+    # Respuesta TwiML
+    resp = MessagingResponse()
+    msg = resp.message()
 
-    if texto.lower() == "/start":
-        estado[chat_id] = MENU
-        enviar_whatsapp(chat_id, MENU_TXT)
-        return "ok"
+    est = estado.get(from_number, INICIO)
 
+    # Comando /start
+    if body.lower() == "/start":
+        estado[from_number] = MENU
+        msg.body(MENU_TXT)
+        return str(resp)
+
+    # Estado inicial
     if est == INICIO:
-        enviar_whatsapp(chat_id, "✋ Enviá /start para comenzar.")
-        return "ok"
+        msg.body("✋ Enviá /start para comenzar.")
+        return str(resp)
 
+    # MENÚ PRINCIPAL
     if est == MENU:
 
-        if texto == "1":
+        if body == "1":
             turnos = cargar_json(TURNOS_FILE)
             fechas = [t["fecha"] for t in turnos]
 
             if not fechas:
-                enviar_whatsapp(chat_id, "❌ No hay fechas disponibles.")
+                msg.body("❌ No hay fechas disponibles.")
             else:
-                estado[chat_id] = FECHA
-                enviar_whatsapp(chat_id, "📅 Fechas:\n" + "\n".join(fechas) + "\n\nEscriba la fecha.")
+                estado[from_number] = FECHA
+                msg.body("📅 Fechas:\n" + "\n".join(fechas) + "\n\nEscriba la fecha.")
+            return str(resp)
 
-            return "ok"
+        if body == "2":
+            estado[from_number] = MENSAJE
+            msg.body("📝 Escriba su mensaje:")
+            return str(resp)
 
-        if texto == "2":
-            estado[chat_id] = MENSAJE
-            enviar_whatsapp(chat_id, "📝 Escriba su mensaje:")
-            return "ok"
+        if body == "3":
+            msg.body("💻 Información en desarrollo.")
+            msg.body(MENU_TXT)
+            return str(resp)
 
-        if texto == "3":
-            enviar_whatsapp(chat_id, "💻 Información en desarrollo.")
-            enviar_whatsapp(chat_id, MENU_TXT)
-            return "ok"
+        if body == "4":
+            msg.body("👋 Hasta pronto.")
+            estado[from_number] = INICIO
+            return str(resp)
 
-        if texto == "4":
-            enviar_whatsapp(chat_id, "👋 Hasta pronto.")
-            estado[chat_id] = INICIO
-            return "ok"
+        msg.body("❌ Opción no válida.")
+        msg.body(MENU_TXT)
+        return str(resp)
 
-        enviar_whatsapp(chat_id, "❌ Opción no válida.")
-        enviar_whatsapp(chat_id, MENU_TXT)
-        return "ok"
-
+    # SELECCIÓN DE FECHA
     if est == FECHA:
-        fecha = texto
+        fecha = body
         turnos = cargar_json(TURNOS_FILE)
         turno = next((t for t in turnos if t["fecha"] == fecha), None)
 
         if not turno:
-            enviar_whatsapp(chat_id, "❌ Fecha no disponible.")
-            return "ok"
+            msg.body("❌ Fecha no disponible.")
+            return str(resp)
 
         libres = [h["hora"] for h in turno["horarios"] if h["disponible"]]
 
         if not libres:
-            enviar_whatsapp(chat_id, "❌ No hay horarios.")
-            return "ok"
+            msg.body("❌ No hay horarios.")
+            return str(resp)
 
-        estado[chat_id] = HORA
-        estado[f"{chat_id}_fecha"] = fecha
-        enviar_whatsapp(chat_id, "⏰ Horarios:\n" + "\n".join(libres) + "\n\nEscriba la hora.")
-        return "ok"
+        estado[from_number] = HORA
+        estado[f"{from_number}_fecha"] = fecha
+        msg.body("⏰ Horarios:\n" + "\n".join(libres) + "\n\nEscriba la hora.")
+        return str(resp)
 
+    # SELECCIÓN DE HORA
     if est == HORA:
-        hora = texto
-        fecha = estado.get(f"{chat_id}_fecha")
+        hora = body
+        fecha = estado.get(f"{from_number}_fecha")
 
         turnos = cargar_json(TURNOS_FILE)
         for t in turnos:
@@ -168,35 +171,48 @@ def webhook():
                         h["disponible"] = False
                         guardar_json(TURNOS_FILE, turnos)
 
-                        enviar_whatsapp(chat_id, f"✅ Turno: {fecha} a las {hora}")
-                        estado[chat_id] = MENU
-                        enviar_whatsapp(chat_id, MENU_TXT)
-                        return "ok"
+                        msg.body(f"✅ Turno: {fecha} a las {hora}")
+                        estado[from_number] = MENU
+                        msg.body(MENU_TXT)
+                        return str(resp)
 
-        enviar_whatsapp(chat_id, "❌ Hora no disponible.")
-        return "ok"
+        msg.body("❌ Hora no disponible.")
+        return str(resp)
 
+    # MENSAJES LIBRES
     if est == MENSAJE:
         mensajes = cargar_json(MENSAJES_FILE)
         mensajes.append({
-            "chat": chat_id,
-            "mensaje": texto,
+            "chat": from_number,
+            "mensaje": body,
             "fecha": str(datetime.now())
         })
         guardar_json(MENSAJES_FILE, mensajes)
 
-        enviar_whatsapp(chat_id, "✅ Mensaje recibido.")
-        estado[chat_id] = MENU
-        enviar_whatsapp(chat_id, MENU_TXT)
-        return "ok"
+        msg.body("✅ Mensaje recibido.")
+        estado[from_number] = MENU
+        msg.body(MENU_TXT)
+        return str(resp)
 
-    return "ok"
+    return str(resp)
 
+
+# --------------------------------------------------
+# VERIFICACIÓN TWILIO (GET)
+# --------------------------------------------------
 
 @app.route("/webhook", methods=["GET"])
 def verify():
+    """
+    Twilio usa GET para verificación inicial.
+    Devuelve hub.challenge para validar URL.
+    """
     return request.args.get("hub.challenge", "")
 
+
+# --------------------------------------------------
+# INICIO SERVIDOR
+# --------------------------------------------------
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
