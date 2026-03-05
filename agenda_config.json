@@ -1,0 +1,9 @@
+{
+  "lunes": {"activo": true, "modo": "manana"},
+  "martes": {"activo": true, "modo": "corrido"},
+  "miercoles": {"activo": true, "modo": "manana"},
+  "jueves": {"activo": true, "modo": "tarde"},
+  "viernes": {"activo": true, "modo": "manana"},
+  "sabado": {"activo": false},
+  "domingo": {"activo": false}
+}
