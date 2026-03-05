@@ -1,0 +1,7 @@
+{
+  "bot_activo": true,
+  "duracion_turno": 30,
+  "modo_hibrido": true,
+  "urgencia": { "numero": "+549000000000" },
+  "admin_number": "whatsapp:+5493515645624"
+}
