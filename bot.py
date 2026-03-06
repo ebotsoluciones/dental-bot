@@ -4,7 +4,7 @@ Bot WhatsApp con Twilio + Flask
 
 Agenda médica simple
 
-Horario :
+Horario:
 09:00 a 19:00
 Intervalo: 30 minutos
 
@@ -36,11 +36,10 @@ MENSAJES_FILE = "mensajes.json"
 estado = {}
 
 # -----------------------------
-# JSON helpers
+# JSON helpers (no borra datos)
 # -----------------------------
 
 def cargar_json(path):
-
     if not os.path.exists(path):
         return []
 
@@ -52,50 +51,44 @@ def cargar_json(path):
 
 
 def guardar_json(path, data):
-
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 # -----------------------------
 # Generar horarios
 # -----------------------------
 
 def generar_horarios():
-
     horarios = []
 
     inicio = datetime.strptime("09:00", "%H:%M")
     fin = datetime.strptime("19:00", "%H:%M")
 
     actual = inicio
-
     while actual <= fin:
-
         horarios.append(actual.strftime("%H:%M"))
         actual += timedelta(minutes=30)
 
     return horarios
+
 
 # -----------------------------
 # Buscar horario libre
 # -----------------------------
 
 def buscar_horario_libre(fecha):
-
     turnos = cargar_json(TURNOS_FILE)
-
     horarios = generar_horarios()
 
-    ocupados = [
-        t["hora"] for t in turnos if t["fecha"] == fecha
-    ]
+    ocupados = [t["hora"] for t in turnos if t["fecha"] == fecha]
 
     for h in horarios:
-
         if h not in ocupados:
             return h
 
     return None
+
 
 # -----------------------------
 # MENUS
@@ -124,317 +117,238 @@ MENU_ADMIN = """
 6 Salir
 """
 
+
 # -----------------------------
 # WEBHOOK
 # -----------------------------
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-
     numero = request.values.get("From")
     body = request.values.get("Body", "").strip()
-
     texto = body.lower()
 
     resp = MessagingResponse()
     msg = resp.message()
 
-    estado_actual = estado.get(numero, "MENU")
+    # inicializar estado (evita None)
+    estado.setdefault(numero, "MENU")
+    estado_actual = estado[numero]
 
     # activar admin
-
     if texto in ["admin", "administrador"]:
-
         estado[numero] = "ADMIN"
-
         msg.body(MENU_ADMIN)
-
         return str(resp)
 
     # volver al menu
-
     if texto in ["menu", "/start"]:
-
         estado[numero] = "MENU"
-
         msg.body(MENU_PACIENTE)
-
         return str(resp)
 
     # flujo admin
-
     if estado_actual == "ADMIN":
-
         return manejar_admin(numero, body, resp)
 
     # flujo paciente
-
     if estado_actual == "MENU":
-
         return manejar_menu(numero, body, resp)
 
     if estado_actual == "TURNO_NOMBRE":
-
-        estado[numero+"_nombre"] = body
+        estado[numero + "_nombre"] = body
         estado[numero] = "TURNO_FECHA"
-
         msg.body("Ingrese fecha (dd/mm/yyyy)")
-
         return str(resp)
 
     if estado_actual == "TURNO_FECHA":
-
         try:
-
             datetime.strptime(body, "%d/%m/%Y")
-
         except:
-
             msg.body("Formato inválido. Use dd/mm/yyyy")
             return str(resp)
 
         hora = buscar_horario_libre(body)
 
         if not hora:
-
             msg.body("Día ocupado. Intente otra fecha")
             return str(resp)
 
         turnos = cargar_json(TURNOS_FILE)
 
         turnos.append({
-
-            "nombre": estado[numero+"_nombre"],
+            "nombre": estado[numero + "_nombre"],
             "telefono": numero,
             "fecha": body,
             "hora": hora
-
         })
 
         guardar_json(TURNOS_FILE, turnos)
 
         estado[numero] = "MENU"
-
         msg.body(f"✅ Turno confirmado\n{body} {hora}")
-
         return str(resp)
 
     if estado_actual == "MENSAJE_NOMBRE":
-
-        estado[numero+"_nombre"] = body
+        estado[numero + "_nombre"] = body
         estado[numero] = "MENSAJE_TEXTO"
-
         msg.body("Escriba su mensaje")
-
         return str(resp)
 
     if estado_actual == "MENSAJE_TEXTO":
-
         mensajes = cargar_json(MENSAJES_FILE)
 
         mensajes.append({
-
-            "nombre": estado[numero+"_nombre"],
+            "nombre": estado[numero + "_nombre"],
             "telefono": numero,
             "mensaje": body,
             "fecha": datetime.now().isoformat(),
             "leido": False
-
         })
 
         guardar_json(MENSAJES_FILE, mensajes)
 
         estado[numero] = "MENU"
-
         msg.body("Mensaje recibido")
-
         return str(resp)
 
     return str(resp)
+
 
 # -----------------------------
 # MENU PACIENTE
 # -----------------------------
 
 def manejar_menu(numero, body, resp):
-
     msg = resp.message()
 
     if body == "1":
-
         estado[numero] = "TURNO_NOMBRE"
-
         msg.body("Ingrese nombre y apellido")
-
         return str(resp)
 
     if body == "2":
-
         estado[numero] = "MENSAJE_NOMBRE"
-
         msg.body("Nombre y apellido")
-
         return str(resp)
 
     if body == "3":
-
         msg.body("Urgencias: +549000000000")
-
         return str(resp)
 
     if body == "4":
-
         msg.body("Informes en desarrollo")
-
         return str(resp)
 
     if body == "5":
-
         msg.body("Hasta pronto. Escriba MENU")
-
         return str(resp)
 
     msg.body(MENU_PACIENTE)
-
     return str(resp)
+
 
 # -----------------------------
 # ADMIN
 # -----------------------------
 
 def manejar_admin(numero, body, resp):
-
     msg = resp.message()
 
     turnos = cargar_json(TURNOS_FILE)
     mensajes = cargar_json(MENSAJES_FILE)
 
-    hoy = datetime.now().strftime("%d/%m/%Y")
-
     # turnos hoy
-
     if body == "1":
-
+        hoy = datetime.now().strftime("%d/%m/%Y")
         lista = [t for t in turnos if t["fecha"] == hoy]
 
         if not lista:
-
             msg.body("No hay turnos hoy")
-
         else:
-
             texto = "\n".join(
                 [f"{t['hora']} {t['nombre']} {t['telefono']}" for t in lista]
             )
-
             msg.body(texto)
 
         return str(resp)
 
     # agenda semana
-
     if body == "2":
-
-        limite = datetime.now() + timedelta(days=7)
+        limite = datetime.now().date() + timedelta(days=7)
 
         lista = [
             t for t in turnos
-            if datetime.strptime(t["fecha"], "%d/%m/%Y") <= limite
+            if datetime.strptime(t["fecha"], "%d/%m/%Y").date() <= limite
         ]
 
         if not lista:
-
             msg.body("Agenda vacía")
-
         else:
-
             texto = "\n".join(
                 [f"{t['fecha']} {t['hora']} {t['nombre']}" for t in lista]
             )
-
             msg.body(texto)
 
         return str(resp)
 
     # futuros
-
     if body == "3":
-
-        hoy_dt = datetime.now()
+        hoy = datetime.now().date()
 
         lista = [
             t for t in turnos
-            if datetime.strptime(t["fecha"], "%d/%m/%Y") > hoy_dt
+            if datetime.strptime(t["fecha"], "%d/%m/%Y").date() > hoy
         ]
 
         if not lista:
-
             msg.body("No hay turnos futuros")
-
         else:
-
             texto = "\n".join(
                 [f"{t['fecha']} {t['hora']} {t['nombre']}" for t in lista]
             )
-
             msg.body(texto)
 
         return str(resp)
 
     # mensajes
-
     if body == "4":
-
         if not mensajes:
-
             msg.body("Sin mensajes")
-
         else:
-
             texto = "\n".join(
                 [f"{m['nombre']} {m['telefono']}\n{m['mensaje']}" for m in mensajes]
             )
-
             msg.body(texto)
 
         return str(resp)
 
     # nuevos
-
     if body == "5":
-
         nuevos = [m for m in mensajes if not m["leido"]]
 
         if not nuevos:
-
             msg.body("Sin mensajes nuevos")
-
         else:
-
             texto = "\n".join(
                 [f"{m['nombre']} {m['telefono']}\n{m['mensaje']}" for m in nuevos]
             )
-
             msg.body(texto)
 
         return str(resp)
 
     if body == "6":
-
         estado[numero] = "MENU"
-
         msg.body("Saliendo admin")
-
         return str(resp)
 
     msg.body(MENU_ADMIN)
-
     return str(resp)
+
 
 # -----------------------------
 # RUN
 # -----------------------------
 
 if __name__ == "__main__":
-
     app.run(host="0.0.0.0", port=5000)
