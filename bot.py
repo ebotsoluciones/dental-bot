@@ -1,7 +1,23 @@
-# ==========================================
-# E-BOT LITE BUSINESS (DUAL MENU TEST)
-# Twilio WhatsApp Sandbox + Flask
-# ==========================================
+"""
+E-BOT LITE BUSINESS
+BOT WHATSAPP CON TWILIO + FLASK
+================================
+
+Funciones:
+- Turnos
+- Mensajes
+- Agenda
+- Administración
+- Mensajes no leídos
+- Cancelación
+
+Almacenamiento:
+- JSON locales (turnos.json, mensajes.json)
+
+Flujo:
+- Webhook Twilio
+- Estado por usuario
+"""
 
 import json
 import os
@@ -15,106 +31,58 @@ app = Flask(__name__)
 # ARCHIVOS
 # -----------------------------
 
-CONFIG_FILE = "config.json"
-AGENDA_FILE = "agenda_config.json"
 TURNOS_FILE = "turnos.json"
 MENSAJES_FILE = "mensajes.json"
 
-# -----------------------------
-# HELPERS JSON
-# -----------------------------
-
-def cargar_json(path, default):
+def cargar_json(path):
+    """Carga JSON o retorna lista vacía."""
     if not os.path.exists(path):
-        guardar_json(path, default)
+        return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return default
+        return []
 
 def guardar_json(path, data):
+    """Guarda JSON con formato legible."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 # -----------------------------
-# CONFIG INICIAL
-# -----------------------------
-
-cargar_json(CONFIG_FILE, {
-    "bot_activo": True,
-    "duracion_turno": 30,
-    "modo_hibrido": True,
-    "urgencia": {"numero": "+549000000000"},
-    "admin_number": "whatsapp:+5493515645624"
-})
-
-cargar_json(AGENDA_FILE, {
-    "lunes": {"activo": True, "modo": "manana"},
-    "martes": {"activo": True, "modo": "corrido"},
-    "miercoles": {"activo": True, "modo": "manana"},
-    "jueves": {"activo": True, "modo": "tarde"},
-    "viernes": {"activo": True, "modo": "manana"},
-    "sabado": {"activo": False},
-    "domingo": {"activo": False}
-})
-
-cargar_json(TURNOS_FILE, [])
-cargar_json(MENSAJES_FILE, [])
-
-# -----------------------------
-# ESTADO
+# ESTADO (memoria en runtime)
 # -----------------------------
 
 estado = {}
 
 # -----------------------------
-# GENERADOR DE SLOTS
+# MENÚS
 # -----------------------------
 
-def generar_slots(fecha):
-    config = cargar_json(CONFIG_FILE, {})
-    agenda = cargar_json(AGENDA_FILE, {})
-    turnos = cargar_json(TURNOS_FILE, [])
+MENU_PACIENTE = """
+🦙 E-Bot Lite
+1️⃣ Turno
+2️⃣ Mensaje
+3️⃣ Urgencia
+4️⃣ Informes
+5️⃣ Salir
+Escriba opción.
+"""
 
-    dia_nombre = fecha.strftime("%A").lower()
-    traduccion = {
-        "monday":"lunes","tuesday":"martes","wednesday":"miercoles",
-        "thursday":"jueves","friday":"viernes",
-        "saturday":"sabado","sunday":"domingo"
-    }
-    dia = traduccion.get(dia_nombre)
-
-    if not agenda.get(dia, {}).get("activo"):
-        return []
-
-    modo = agenda[dia].get("modo", "manana")
-    duracion = config.get("duracion_turno", 30)
-
-    if modo == "manana":
-        inicio, fin = 9, 12
-    elif modo == "tarde":
-        inicio, fin = 15, 19
-    else:
-        inicio, fin = 9, 18
-
-    slots = []
-    actual = datetime(fecha.year, fecha.month, fecha.day, inicio, 0)
-
-    while actual.hour < fin:
-        hora_str = actual.strftime("%H:%M")
-        ocupado = any(
-            t["fecha"] == fecha.strftime("%Y-%m-%d") and t["hora"] == hora_str
-            for t in turnos
-        )
-        if not ocupado:
-            slots.append(hora_str)
-        actual += timedelta(minutes=duracion)
-
-    return slots
+MENU_ADMIN = """
+🛠 ADMIN
+1️⃣ Turnos del día
+2️⃣ Agenda semanal
+3️⃣ Ver turnos futuros
+4️⃣ Agregar turno
+5️⃣ Cancelar turno
+6️⃣ Ver mensajes
+7️⃣ Mensajes no leídos
+8️⃣ Salir
+"""
 
 # -----------------------------
-# WEBHOOK
+# WEBHOOK TWILIO
 # -----------------------------
 
 @app.route("/webhook", methods=["POST"])
@@ -125,150 +93,192 @@ def webhook():
     resp = MessagingResponse()
     msg = resp.message()
 
-    config = cargar_json(CONFIG_FILE, {})
     est = estado.get(from_number, "MENU")
 
-    if not config.get("bot_activo", True):
-        msg.body("El bot está desactivado.")
-        return str(resp)
-
-    # ACCESO ADMIN (dual)
+    # COMANDO PARA ENTRAR ADMIN
     if body.lower() in ["admin", "adm"]:
         estado[from_number] = "ADMIN"
-        msg.body("🛠 ADMIN\n1 Turnos hoy\n2 Mensajes\n3 Activar/Desactivar\n4 Salir")
+        msg.body(MENU_ADMIN)
         return str(resp)
 
-    # ADMIN MENU
+    # ADMIN FLOW
     if est == "ADMIN":
-        if body == "1":
-            hoy = datetime.now().strftime("%Y-%m-%d")
-            turnos = cargar_json(TURNOS_FILE, [])
-            lista = [t for t in turnos if t["fecha"] == hoy]
+        return manejar_admin(from_number, body, resp)
 
-            if not lista:
-                msg.body("No hay turnos hoy.")
-            else:
-                texto = "\n".join([f"{t['hora']} - {t['numero']}" for t in lista])
-                msg.body(texto)
-            return str(resp)
-
-        if body == "2":
-            mensajes = cargar_json(MENSAJES_FILE, [])
-            pendientes = [m for m in mensajes if not m.get("leido")]
-
-            if not pendientes:
-                msg.body("Sin mensajes pendientes.")
-            else:
-                texto = "\n".join([f"{m['numero']}: {m['mensaje']}" for m in pendientes])
-                msg.body(texto)
-            return str(resp)
-
-        if body == "3":
-            config["bot_activo"] = not config.get("bot_activo", True)
-            guardar_json(CONFIG_FILE, config)
-            msg.body("Bot activo." if config["bot_activo"] else "Bot desactivado.")
-            return str(resp)
-
-        if body == "4":
-            estado[from_number] = "MENU"
-            msg.body("Saliendo admin.")
-            return str(resp)
-
-    # MENU PRINCIPAL (paciente)
+    # MENU PACIENTE
     if body.lower() in ["menu", "/start"]:
         estado[from_number] = "MENU"
-        msg.body("🦙 E-Bot Lite Business\n1 Turno\n2 Mensaje\n3 Urgencia\n4 Salir\nEscriba opción.")
+        msg.body(MENU_PACIENTE)
         return str(resp)
 
     if est == "MENU":
+        return manejar_menu(from_number, body, resp)
 
-        if body == "1":
-            estado[from_number] = "FECHA"
-            msg.body("Ingrese fecha (dd/mm/yyyy)")
-            return str(resp)
+    return str(resp)
 
-        if body == "2":
-            estado[from_number] = "MENSAJE"
-            msg.body("Escriba su mensaje:")
-            return str(resp)
 
-        if body == "3":
-            urg = config.get("urgencia", {}).get("numero", "sin número")
-            msg.body(f"En caso de urgencia: {urg}")
-            return str(resp)
+# -----------------------------
+# MENÚ PACIENTE
+# -----------------------------
 
-        if body == "4":
-            if config.get("modo_hibrido", True):
-                estado[from_number] = "LIBRE"
-                msg.body("Puede escribir libremente.")
-            else:
-                estado[from_number] = "MENU"
-                msg.body("Menú cerrado. Escriba MENU.")
-            return str(resp)
+def manejar_menu(numero, body, resp):
+    msg = resp.message()
 
-    # FECHA
-    if est == "FECHA":
-        try:
-            fecha = datetime.strptime(body, "%d/%m/%Y")
-        except:
-            msg.body("Formato inválido (dd/mm/yyyy)")
-            return str(resp)
-
-        slots = generar_slots(fecha)
-        if not slots:
-            msg.body("No hay disponibilidad ese día.")
-            return str(resp)
-
-        estado[from_number] = {"confirmando": fecha.strftime("%Y-%m-%d"), "slots": slots}
-        texto = "\n".join([f"{i+1} {h}" for i, h in enumerate(slots)])
-        msg.body("Horarios:\n" + texto + "\nSeleccione número.")
+    if body == "1":
+        estado[numero] = "TURNO"
+        msg.body("Ingrese fecha (dd/mm/yyyy)")
         return str(resp)
 
-    # CONFIRMACIÓN SLOT
-    if isinstance(est, dict):
+    if body == "2":
+        estado[numero] = "MENSAJE"
+        msg.body("Escriba su mensaje:")
+        return str(resp)
+
+    if body == "3":
+        msg.body("En caso de urgencia: +549000000000")
+        return str(resp)
+
+    if body == "4":
+        msg.body("Informes: servicio en desarrollo.")
+        return str(resp)
+
+    if body == "5":
+        estado[numero] = "MENU"
+        msg.body("👋 Hasta pronto. Escriba MENU para volver.")
+        return str(resp)
+
+    msg.body(MENU_PACIENTE)
+    return str(resp)
+
+
+# -----------------------------
+# MENSAJE LIBRE (paciente)
+# -----------------------------
+
+def guardar_mensaje(numero, body):
+    mensajes = cargar_json(MENSAJES_FILE)
+    mensajes.append({
+        "numero": numero,
+        "mensaje": body,
+        "fecha": datetime.now().isoformat(),
+        "leido": False
+    })
+    guardar_json(MENSAJES_FILE, mensajes)
+
+
+# -----------------------------
+# TURNO (paciente)
+# -----------------------------
+
+def guardar_turno(numero, fecha):
+    turnos = cargar_json(TURNOS_FILE)
+    turnos.append({
+        "numero": numero,
+        "fecha": fecha,
+        "hora": "00:00"
+    })
+    guardar_json(TURNOS_FILE, turnos)
+
+
+# -----------------------------
+# MENSAJE TURNO
+# -----------------------------
+
+@app.route("/webhook", methods=["POST"])
+def flujo_turno():
+    from_number = request.values.get("From")
+    body = request.values.get("Body", "").strip()
+    resp = MessagingResponse()
+    msg = resp.message()
+
+    est = estado.get(from_number)
+
+    if est == "TURNO":
         try:
-            seleccion = int(body) - 1
-        except:
-            msg.body("Seleccione número válido.")
-            return str(resp)
-
-        slots = est.get("slots", [])
-        if 0 <= seleccion < len(slots):
-            turno = {
-                "fecha": est["confirmando"],
-                "hora": slots[seleccion],
-                "numero": from_number
-            }
-
-            turnos = cargar_json(TURNOS_FILE, [])
-
-            if any(t["fecha"] == turno["fecha"] and t["hora"] == turno["hora"] and t["numero"] == turno["numero"] for t in turnos):
-                msg.body("Ya tiene turno en ese horario.")
-                estado[from_number] = "MENU"
-                return str(resp)
-
-            turnos.append(turno)
-            guardar_json(TURNOS_FILE, turnos)
-
+            datetime.strptime(body, "%d/%m/%Y")
+            guardar_turno(from_number, body)
             estado[from_number] = "MENU"
-            msg.body(f"Turno confirmado {turno['fecha']} {turno['hora']}")
-            return str(resp)
-
-    # MENSAJE LIBRE
-    if est == "MENSAJE":
-        mensajes = cargar_json(MENSAJES_FILE, [])
-        mensajes.append({
-            "numero": from_number,
-            "mensaje": body,
-            "fecha": datetime.now().isoformat(),
-            "leido": False
-        })
-        guardar_json(MENSAJES_FILE, mensajes)
-
-        estado[from_number] = "MENU"
-        msg.body("Mensaje enviado.")
+            msg.body(f"Turno solicitado para {body}")
+        except:
+            msg.body("Formato inválido. Use dd/mm/yyyy")
         return str(resp)
 
+    if est == "MENSAJE":
+        guardar_mensaje(from_number, body)
+        estado[from_number] = "MENU"
+        msg.body("Mensaje recibido.")
+        return str(resp)
+
+    return str(resp)
+
+
+# -----------------------------
+# ADMIN
+# -----------------------------
+
+def manejar_admin(numero, body, resp):
+    msg = resp.message()
+
+    if body == "1":
+        hoy = datetime.now().strftime("%d/%m/%Y")
+        turnos = [t for t in cargar_json(TURNOS_FILE) if t["fecha"] == hoy]
+        if not turnos:
+            msg.body("No hay turnos hoy.")
+        else:
+            texto = "\n".join([t["numero"] for t in turnos])
+            msg.body(texto)
+        return str(resp)
+
+    if body == "2":
+        semana = datetime.now() + timedelta(days=7)
+        turnos = [t for t in cargar_json(TURNOS_FILE)
+                 if datetime.strptime(t["fecha"], "%d/%m/%Y") <= semana]
+        if not turnos:
+            msg.body("Agenda vacía.")
+        else:
+            texto = "\n".join([f"{t['fecha']} - {t['numero']}" for t in turnos])
+            msg.body(texto)
+        return str(resp)
+
+    if body == "3":
+        hoy = datetime.now()
+        turnos = [t for t in cargar_json(TURNOS_FILE)
+                 if datetime.strptime(t["fecha"], "%d/%m/%Y") > hoy]
+        if not turnos:
+            msg.body("No hay turnos futuros.")
+        else:
+            texto = "\n".join([f"{t['fecha']} - {t['numero']}" for t in turnos])
+            msg.body(texto)
+        return str(resp)
+
+    if body == "4":
+        estado[numero] = "ADMIN_TURNO"
+        msg.body("Agregar turno: fecha dd/mm/yyyy")
+        return str(resp)
+
+    if body == "5":
+        estado[numero] = "ADMIN_CANCEL"
+        msg.body("Cancelar turno: fecha dd/mm/yyyy")
+        return str(resp)
+
+    if body == "6":
+        mensajes = cargar_json(MENSAJES_FILE)
+        texto = "\n".join([f"{m['numero']}: {m['mensaje']}" for m in mensajes])
+        msg.body(texto or "Sin mensajes.")
+        return str(resp)
+
+    if body == "7":
+        mensajes = [m for m in cargar_json(MENSAJES_FILE) if not m["leido"]]
+        texto = "\n".join([f"{m['numero']}: {m['mensaje']}" for m in mensajes])
+        msg.body(texto or "Sin mensajes nuevos.")
+        return str(resp)
+
+    if body == "8":
+        estado[numero] = "MENU"
+        msg.body("Saliendo admin.")
+        return str(resp)
+
+    msg.body(MENU_ADMIN)
     return str(resp)
 
 
