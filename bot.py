@@ -4,7 +4,7 @@ Bot WhatsApp con Twilio + Flask
 
 Agenda médica simple
 
-Horario:
+Horario :
 09:00 a 19:00
 Intervalo: 30 minutos
 
