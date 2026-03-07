@@ -12,7 +12,7 @@ MENSAJES_FILE = "mensajes.json"
 estado = {}
 
 ADMINS = [
-"whatsapp:+549XXXXXXXXXX"
+"whatsapp:+5493515645624"
 ]
 
 # -----------------------------
