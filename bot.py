@@ -169,6 +169,9 @@ def manejar_admin(numero, body, resp):
 # WEBHOOK (GET y POST)
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+    if request.method == "GET":
+        return "OK"
+
     numero = request.values.get("From")
     body = request.values.get("Body", "").strip()
     texto = body.lower()
@@ -178,10 +181,6 @@ def webhook():
 
     estado.setdefault(numero, "MENU")
     estado_actual = estado[numero]
-
-    # si GET (Twilio a veces prueba)
-    if request.method == "GET":
-        return "OK"
 
     # menú siempre responde
     if estado_actual == "MENU":
