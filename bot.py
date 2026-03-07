@@ -1,9 +1,3 @@
-"""
-E-BOT LITE 🦙
-Bot WhatsApp con Twilio + Flask
-Agenda médica (corregido)
-"""
-
 import json
 import os
 from flask import Flask, request
@@ -15,14 +9,15 @@ app = Flask(__name__)
 TURNOS_FILE = "turnos.json"
 MENSAJES_FILE = "mensajes.json"
 
+# ESTADOS en memoria (para prueba)
 estado = {}
 
-# ADMINISTRADORES
+# ADMINISTRADORES (prueba)
 ADMINS = [
     "whatsapp:+5493515645624"
 ]
 
-# MENÚS (no modificados)
+# MENÚS
 MENU_PACIENTE = """
 🦙 E-Bot Lite
 1 Turno
@@ -70,16 +65,6 @@ def generar_horarios():
         actual += timedelta(minutes=30)
     return horarios
 
-def buscar_horario_libre(fecha):
-    turnos = cargar_json(TURNOS_FILE)
-    horarios = generar_horarios()
-    ocupados = [t["hora"] for t in turnos if t["fecha"] == fecha]
-
-    for h in horarios:
-        if h not in ocupados:
-            return h
-    return None
-
 def obtener_turnos_futuros():
     hoy = datetime.now().date()
     turnos = cargar_json(TURNOS_FILE)
@@ -88,7 +73,6 @@ def obtener_turnos_futuros():
         t for t in turnos
         if datetime.strptime(t["fecha"], "%d/%m/%Y").date() >= hoy
     ]
-
     return sorted(futuros, key=lambda x: (x["fecha"], x["hora"]))
 
 # WEBHOOK
@@ -103,16 +87,20 @@ def webhook():
     estado.setdefault(numero, "MENU")
     estado_actual = estado[numero]
 
-    es_admin = numero in ADMINS
-
-    # COMANDO MENU (siempre vuelve)
+    # MENÚ siempre vuelve
     if texto in ["menu", "/start"]:
         estado[numero] = "MENU"
-        msg.body(MENU_ADMIN if es_admin else MENU_PACIENTE)
+        msg.body(MENU_ADMIN if numero in ADMINS else MENU_PACIENTE)
+        return str(resp)
+
+    # palabra secreta admin
+    if texto in ["adm", "admin"]:
+        estado[numero] = "ADMIN"
+        msg.body(MENU_ADMIN)
         return str(resp)
 
     # ADMIN
-    if estado_actual == "ADMIN" and es_admin:
+    if estado_actual == "ADMIN" and numero in ADMINS:
         return manejar_admin(numero, body, resp)
 
     # PACIENTE
@@ -129,27 +117,62 @@ def webhook():
     # TURNO: fecha
     if estado_actual == "TURNO_FECHA":
         try:
-            datetime.strptime(body, "%d/%m/%Y")
+            fecha = datetime.strptime(body, "%d/%m/%Y").date()
         except:
             msg.body("Formato inválido. Use dd/mm/yyyy")
             return str(resp)
 
-        hora = buscar_horario_libre(body)
-        if not hora:
-            msg.body("Día ocupado. Intente otra fecha")
+        if fecha < datetime.now().date():
+            msg.body("Fecha pasada. Elija otra")
+            return str(resp)
+
+        estado[numero + "_fecha"] = body
+        estado[numero] = "TURNO_HORA"
+
+        horarios = generar_horarios()
+        turnos = cargar_json(TURNOS_FILE)
+        ocupados = [t["hora"] for t in turnos if t["fecha"] == body]
+        libres = [h for h in horarios if h not in ocupados]
+
+        if not libres:
+            msg.body("No hay horarios disponibles ese día")
+            estado[numero] = "MENU"
+            return str(resp)
+
+        msg.body("Elija hora:\n" + "\n".join(libres))
+        return str(resp)
+
+    # TURNO: hora
+    if estado_actual == "TURNO_HORA":
+        hora = body.strip()
+        horarios = generar_horarios()
+
+        if hora not in horarios:
+            msg.body("Hora inválida")
+            return str(resp)
+
+        fecha = estado.get(numero + "_fecha")
+        if not fecha:
+            msg.body("Error de estado. Vuelva a iniciar turno")
+            estado[numero] = "MENU"
             return str(resp)
 
         turnos = cargar_json(TURNOS_FILE)
+
+        if any(t["fecha"] == fecha and t["hora"] == hora for t in turnos):
+            msg.body("Hora ocupada. Elija otra")
+            return str(resp)
+
         turnos.append({
             "nombre": estado[numero + "_nombre"],
             "telefono": numero,
-            "fecha": body,
+            "fecha": fecha,
             "hora": hora
         })
         guardar_json(TURNOS_FILE, turnos)
 
         estado[numero] = "MENU"
-        msg.body(f"✅ Turno confirmado\n{estado[numero + '_nombre']}\n{body} {hora}")
+        msg.body(f"✅ Turno confirmado\n{estado[numero + '_nombre']}\n{fecha} {hora}")
         return str(resp)
 
     # MENSAJE
@@ -176,7 +199,7 @@ def webhook():
 
     return str(resp)
 
-# MENU PACIENTE
+# MENÚ PACIENTE
 def manejar_menu(numero, body, resp):
     msg = resp.message()
 
@@ -230,7 +253,6 @@ def manejar_admin(numero, body, resp):
     if body == "1":
         hoy = datetime.now().strftime("%d/%m/%Y")
         lista = [t for t in turnos if t["fecha"] == hoy]
-
         msg.body("No hay turnos hoy" if not lista else "\n".join([
             f"{t['hora']} {t['nombre']} {t['telefono']}" for t in lista
         ]))
@@ -238,7 +260,6 @@ def manejar_admin(numero, body, resp):
 
     if body == "2":
         lista = obtener_turnos_futuros()
-
         msg.body("No hay próximos turnos" if not lista else "\n".join([
             f"{t['fecha']} {t['hora']} {t['nombre']}" for t in lista
         ]))
@@ -276,6 +297,6 @@ def manejar_admin(numero, body, resp):
 def home():
     return "E-Bot activo"
 
-# RUN
+# RUN LOCAL
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
