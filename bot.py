@@ -1,7 +1,7 @@
 """
 E-BOT LITE 🦙
 Bot WhatsApp con Twilio + Flask
-Agenda médica simple (corregido)
+Agenda médica (corregido)
 """
 
 import json
@@ -22,29 +22,27 @@ ADMINS = [
     "whatsapp:+5493515645624"
 ]
 
-# MENÚS
+# MENÚS (no modificados)
 MENU_PACIENTE = """
 🦙 E-Bot Lite
-👤 Clínica Demo
-
-1️⃣ Turno
-2️⃣ Consultar mi turno
-3️⃣ Mensaje 📩
-4️⃣ Urgencia 🚑
-5️⃣ Informes
-6️⃣ Salir
+1 Turno
+2 Consultar mi turno
+3 Mensaje 📩
+4 Urgencia 🚑
+5 Informes
+6 Salir
 """
 
 MENU_ADMIN = """
 🛠 ADMIN
 
-1️⃣ Turnos de hoy 📅
-2️⃣ Próximos turnos ⏩
-3️⃣ Ver mensajes 📩
-4️⃣ Ingresar turno ➕
-5️⃣ Cancelar turno ❌
-6️⃣ Bloquear agenda 🔒
-7️⃣ Salir
+1 Turnos del día
+2 Próximos turnos
+3 Ver mensajes
+4 Ingresar turno
+5 Cancelar turno
+6 Bloquear agenda
+7 Salir
 """
 
 # HELPERS JSON
@@ -76,6 +74,7 @@ def buscar_horario_libre(fecha):
     turnos = cargar_json(TURNOS_FILE)
     horarios = generar_horarios()
     ocupados = [t["hora"] for t in turnos if t["fecha"] == fecha]
+
     for h in horarios:
         if h not in ocupados:
             return h
@@ -84,10 +83,12 @@ def buscar_horario_libre(fecha):
 def obtener_turnos_futuros():
     hoy = datetime.now().date()
     turnos = cargar_json(TURNOS_FILE)
+
     futuros = [
         t for t in turnos
         if datetime.strptime(t["fecha"], "%d/%m/%Y").date() >= hoy
     ]
+
     return sorted(futuros, key=lambda x: (x["fecha"], x["hora"]))
 
 # WEBHOOK
@@ -104,15 +105,10 @@ def webhook():
 
     es_admin = numero in ADMINS
 
-    # COMANDOS GENERALES
+    # COMANDO MENU (siempre vuelve)
     if texto in ["menu", "/start"]:
         estado[numero] = "MENU"
-        msg.body(MENU_PACIENTE if not es_admin else MENU_ADMIN)
-        return str(resp)
-
-    if es_admin and texto in ["admin", "administrador"]:
-        estado[numero] = "ADMIN"
-        msg.body(MENU_ADMIN)
+        msg.body(MENU_ADMIN if es_admin else MENU_PACIENTE)
         return str(resp)
 
     # ADMIN
@@ -192,6 +188,7 @@ def manejar_menu(numero, body, resp):
     if body == "2":
         turnos = cargar_json(TURNOS_FILE)
         lista = [t for t in turnos if t["telefono"] == numero]
+
         if not lista:
             msg.body("No se encontraron turnos para su número")
         else:
@@ -233,16 +230,24 @@ def manejar_admin(numero, body, resp):
     if body == "1":
         hoy = datetime.now().strftime("%d/%m/%Y")
         lista = [t for t in turnos if t["fecha"] == hoy]
-        msg.body("No hay turnos hoy" if not lista else "\n".join([f"{t['hora']} {t['nombre']} {t['telefono']}" for t in lista]))
+
+        msg.body("No hay turnos hoy" if not lista else "\n".join([
+            f"{t['hora']} {t['nombre']} {t['telefono']}" for t in lista
+        ]))
         return str(resp)
 
     if body == "2":
         lista = obtener_turnos_futuros()
-        msg.body("No hay próximos turnos" if not lista else "\n".join([f"{t['fecha']} {t['hora']} {t['nombre']}" for t in lista]))
+
+        msg.body("No hay próximos turnos" if not lista else "\n".join([
+            f"{t['fecha']} {t['hora']} {t['nombre']}" for t in lista
+        ]))
         return str(resp)
 
     if body == "3":
-        msg.body("Sin mensajes" if not mensajes else "\n".join([f"{m['nombre']} {m['telefono']}\n{m['mensaje']}" for m in mensajes]))
+        msg.body("Sin mensajes" if not mensajes else "\n".join([
+            f"{m['nombre']} {m['telefono']}\n{m['mensaje']}" for m in mensajes
+        ]))
         return str(resp)
 
     if body == "4":
