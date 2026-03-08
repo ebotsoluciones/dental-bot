@@ -1,24 +1,58 @@
-const express = require("express");
-const app = express();
-app.use(express.json());
+// server.js - Dental Bot / WhatsApp Cloud API sin Express
 
+const http = require("http");
+const url = require("url");
+
+// Token de verificación definido en WhatsApp Cloud API
 const VERIFY_TOKEN = "ebot-token";
 
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+const server = http.createServer((req, res) => {
+  const parsedUrl = url.parse(req.url, true);
+  const pathname = parsedUrl.pathname;
 
-  if (mode && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  } else {
-    return res.sendStatus(403);
+  // -------------------------------
+  // GET /webhook → Verificación Meta
+  // -------------------------------
+  if (req.method === "GET" && pathname === "/webhook") {
+    const query = parsedUrl.query;
+    if (query["hub.mode"] && query["hub.verify_token"] === VERIFY_TOKEN) {
+      // Devuelve solo el challenge como texto plano
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(query["hub.challenge"]);
+    } else {
+      res.writeHead(403);
+      res.end("Forbidden");
+    }
+    return;
   }
+
+  // -------------------------------
+  // POST /webhook → Recepción de eventos
+  // -------------------------------
+  if (req.method === "POST" && pathname === "/webhook") {
+    let body = "";
+    req.on("data", chunk => { body += chunk.toString(); });
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+        console.log("Evento recibido:", data);
+      } catch (err) {
+        console.log("Error parseando body:", err);
+      }
+      res.writeHead(200);
+      res.end("EVENT_RECEIVED");
+    });
+    return;
+  }
+
+  // -------------------------------
+  // Cualquier otro método / ruta
+  // -------------------------------
+  res.writeHead(405, { "Content-Type": "text/plain" });
+  res.end("Método no permitido");
 });
 
-app.post("/webhook", (req, res) => {
-  console.log("Evento recibido:", req.body);
-  res.sendStatus(200);
-});
-
-app.listen(process.env.PORT || 3000);
+// Puerto dinámico de Railway
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+``
