@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && pathname === "/webhook") {
     const query = parsedUrl.query;
     if (query["hub.mode"] && query["hub.verify_token"] === VERIFY_TOKEN) {
-      // Devuelve solo el challenge como texto plano
+      console.log("Recibido GET /webhook");
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(query["hub.challenge"]);
     } else {
@@ -35,6 +35,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
+        console.log("Recibido POST /webhook");
         console.log("Evento recibido:", data);
       } catch (err) {
         console.log("Error parseando body:", err);
@@ -55,4 +56,3 @@ const server = http.createServer((req, res) => {
 // Puerto dinámico de Railway
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
-``
